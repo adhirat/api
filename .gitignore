@@ -3,3 +3,7 @@
 /api/bin
 api/pyvenv.cfg
 calendar.json
+
+/env/lib
+/env/bin
+env/pyvenv.cfg
