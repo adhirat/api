@@ -11,12 +11,19 @@ app = Flask(__name__)
 gcal.SetFastingSchema(0)
 
 # Function to extract attributes from an object
-def extract_attributes(obj):
+def extract_attributes(obj,country):
     attributes = {}
     for attr in dir(obj):
         if not attr.startswith('__') and not callable(getattr(obj, attr)):
             key = attr.replace("m_str", "").lower()
-            attributes[key] = getattr(obj, attr)
+            if key == "fullname":
+                value = getattr(obj, attr)
+                city, zone = value.split(" ("+country+")", 1)
+                attributes["city"] = city
+                zone, timezone = value.split("Timezone: ", 1)
+                attributes["timezone"] = timezone.rstrip(')')
+            else:
+                attributes[key] = getattr(obj, attr)
     return attributes
 
 
@@ -68,14 +75,20 @@ def get_countries():
 
 
 # List cities for given country
-@app.route('/locations/<country>', methods=['GET'])
-def get_locations_for_country(country):
+@app.route('/cities', methods=['GET','POST'])
+def get_locations_for_country():
+    req_data = None
+    if request.method == 'GET':
+        req_data = request.args
+    elif request.method == 'POST':
+        req_data = request.json
+        
     gcal.GCLocationList
-    cities = gcal.GetLocationsForCountry(country)
-    data = [extract_attributes(obj) for obj in cities]
+    cities = gcal.GetLocationsForCountry(req_data.get('country'))
+    data = [extract_attributes(obj,req_data.get('country')) for obj in cities]
     json_data = json.dumps(data)
     if cities:
-        print(country)
+        print(req_data.get('country'))
         print(json_data)
         return json_data, 200
     else:
@@ -103,15 +116,6 @@ def find_location(city):
         return jsonify(loc_dict), 200
     else:
         return jsonify({"error": "Location not found"}), 404
-
-# Print Dates
-@app.route('/printdates/<selectedDate>', methods=['GET'])
-def get_dates(selectedDate):
-    today = gcal.Today()
-    print("Today::>  "+repr(today))
-    date1 = gcal.GCGregorianDate(text=selectedDate)
-    print("Date::>  "+repr(date1))
-    return jsonify("Dates printed"), 200
 
 # Compute Valender Data
 @app.route('/calendar', methods=['GET','POST'])
