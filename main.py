@@ -1,10 +1,10 @@
-from flask import Flask, request, jsonify, send_file, Response
-
+from flask import Flask, Response, request, jsonify
 import gaurabda as gcal
 import json as json
 import os as os
-import requests
 import io as io
+import datetime
+import requests
 
 app = Flask(__name__)
 
@@ -15,7 +15,8 @@ def extract_attributes(obj):
     attributes = {}
     for attr in dir(obj):
         if not attr.startswith('__') and not callable(getattr(obj, attr)):
-            attributes[attr] = getattr(obj, attr)
+            key = attr.replace("m_str", "").lower()
+            attributes[key] = getattr(obj, attr)
     return attributes
 
 
@@ -103,7 +104,6 @@ def find_location(city):
     else:
         return jsonify({"error": "Location not found"}), 404
 
-
 # Print Dates
 @app.route('/printdates/<selectedDate>', methods=['GET'])
 def get_dates(selectedDate):
@@ -114,69 +114,13 @@ def get_dates(selectedDate):
     return jsonify("Dates printed"), 200
 
 # Compute Valender Data
-@app.route('/calculate/<location>/<format>', methods=['GET'])
-def get_calculate(location,format):
-     # Delete any file with the name 'calendar'
-    for file_name in os.listdir():
-        if file_name.startswith('calendar'):
-            os.remove(file_name)
-            
-            
-    today = gcal.Today()
-    loc = gcal.FindLocation(city=location)
-    # create calculation engine and calculate
-    tc = gcal.TCalendar()
-    tc.CalculateCalendar(loc,today,365)
-    filename=''
-    returntype=''
-    #print(tc)
-    # save results in various formats
-    if format == 'plain':
-        filename='calendar.txt'
-        returntype='text/plain'
-        with open(filename, 'wt') as wf:
-            tc.write(wf, format='plain')
-    elif format == 'rtf':
-        filename='calendar.rtf'
-        returntype='application/rtf'
-        with open(filename, 'wt') as wf:
-            tc.write(wf, format='rtf')
-    elif format == 'html':
-        filename='calendar.html'
-        returntype='text/html'
-        with open(filename, 'wt') as wf:
-            tc.write(wf)
-    elif format == 'table_html':
-        filename='calendar.html'
-        returntype='text/html'
-        with open(filename, 'wt') as wf:
-            tc.write(wf, layout='table')
-    elif format == 'json':
-        filename='calendar.json'
-        returntype='application/json'
-        with open(filename, 'wt') as wf:
-            tc.write(wf, format='json')
-    elif format == 'xml':
-        filename='calendar.xml'
-        returntype='application/xml'
-        with open(filename, 'wt') as wf:
-            tc.write(wf, format='xml')
-    else:
-        filename='calendar.json'
-        returntype='application/json'
-        with open(filename, 'wt') as wf:
-            tc.write(wf, format='json')
-            
-    return send_file(filename, mimetype=returntype, as_attachment=True)   , 200
-    #return jsonify(repr(tc.writeTableHtml)), 200
-
-
 @app.route('/calendar', methods=['GET','POST'])
-def getCalendar():
+def get_calculate():
     loca = {}
     date = {}
+    returntype=''
     period = None
-    fmt = None
+    format = None
     req_data = None
     if request.method == 'GET':
         req_data = request.args
@@ -194,8 +138,8 @@ def getCalendar():
     date['month'] = req_data.get('month')
     date['day'] = req_data.get('day')
     period = req_data.get('period')
-    fmt = req_data.get('format')
-    
+    format = req_data.get('format')
+
     if loca['latitude'] is None and loca['longitude'] is not None \
        or loca['latitude'] is not None and loca['longitude'] is None:
        return Flask.make_response('Either both LATITUDE,LONGITUDE are valid or none of them', 500)
@@ -205,7 +149,7 @@ def getCalendar():
 
     if loca['country'] is None:
         return Flask.make_response('country: Name of country must be specified.', 500)
-
+    
     if loca['latitude'] is None:
         sp = gcal.FindLocation(city=loca['city'], country=loca['country'])
         if sp is None:
@@ -217,13 +161,9 @@ def getCalendar():
     else:
         loca['latitude'] = float(loca['latitude'])
         loca['longitude'] = float(loca['longitude'])
-
-    if loca['tzname'] is None:
-        return Flask.make_response('tz: Name of timezone must be specified.', 500)
     
     if date['year'] is None:
-        d = io.Today()
-        date['year'] = d.year
+        date['year'] = datetime.datetime.now().year
     else:
         date['year'] = int(date['year'])
 
@@ -236,9 +176,9 @@ def getCalendar():
         date['day'] = 1
     else:
         date['day'] = int(date['day'])
-
+    
     if period is None:
-        return Flask.make_response('p: Time period must be specified.', 500)
+        period = 365
     try:
         period = int(period)
     except:
@@ -247,9 +187,9 @@ def getCalendar():
         return Flask.make_response('p: Time period must be greater than 0 days.', 500)
     if period>3653:
         return Flask.make_response('p: Time period must be lower than 3654 days.', 500)
-
+    
+    # create calculation engine and calculate
     tc = gcal.TCalendar()
-    date2 = gcal.GCGregorianDate(year=date['year'], month=date['month'], day=date['day'])
     location = loca.get('location')
     if location is None:
         location = gcal.GCLocation(data={
@@ -259,25 +199,31 @@ def getCalendar():
             'longitude': loca['longitude'],
             'tzname': loca['tzname']
         })
-    tc.CalculateCalendar(location,date2,period)
-
+    tc.CalculateCalendar(location,gcal.GCGregorianDate(year=date['year'], month=date['month'], day=date['day']),period)
     wf = io.StringIO()
-
-    # save results in various formats
-    if fmt == 'txt' or fmt=='text' or fmt=='plain':
+    
+    # calculate results in various formats
+    if format == 'plain' or format == 'txt' or format =='text':
+        returntype='text/plain'
         tc.write(wf, format='plain')
-        return Response(wf.getvalue(), mimetype='text/plain')
-    elif fmt=='html':
+    elif format == 'rtf':
+        returntype='application/rtf'
+        tc.write(wf, format='rtf')
+    elif format == 'html':
+        returntype='text/html'
         tc.write(wf)
-        return Response(wf.getvalue(), mimetype='text/html')
-    elif fmt=='html-table':
-        tc.write(wf, layout='table')
-        return Response(wf.getvalue(), mimetype='text/html')
-    elif fmt=='xml':
+    elif format == 'table_html':
+        returntype='text/html'
+        tc.write(wf, format='table')
+    elif format == 'xml':
+        returntype='application/xml'
         tc.write(wf, format='xml')
-        return Response(wf.getvalue(), mimetype='text/xml')
     else:
-        return jsonify(tc.get_json_object())
+        returntype='application/json'
+        tc.write(wf, format='json')
+            
+    return Response(wf.getvalue(), returntype)   , 200
+    #return jsonify(repr(tc.writeTableHtml)), 200
 
 
 @app.route('/data/<tab>', methods=['GET'])
